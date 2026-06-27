@@ -13,6 +13,8 @@ A lightweight data API built with Next.js App Router and MongoDB. Register a pro
   - [POST /api/v1/start](#post-apiv1start)
   - [GET /api/v1/route/\[...project\]](#get-apiv1routeproject)
   - [POST /api/v1/route/\[...project\]](#post-apiv1routeproject)
+  - [PUT /api/v1/route/\[...project\]](#put-apiv1routeproject)
+  - [DELETE /api/v1/route/\[...project\]](#delete-apiv1routeproject)
 - [Authentication](#authentication)
 - [Project Name Rules](#project-name-rules)
 - [Error Format](#error-format)
@@ -25,9 +27,11 @@ A lightweight data API built with Next.js App Router and MongoDB. Register a pro
 Njord organises data around **seasons** — a season is a registered project that gets a unique 64-character access token. Once you have a token, you can read and write documents to any path under that project using a simple REST interface backed by MongoDB.
 
 ```
-POST /api/v1/start                    → register a project, receive a token
-GET  /api/v1/route/my_project/users   → fetch all documents in my_project.users
-POST /api/v1/route/my_project/users   → insert a document into my_project.users
+POST   /api/v1/start                    → register a project, receive a token
+GET    /api/v1/route/my_project/users   → fetch all documents in my_project.users
+POST   /api/v1/route/my_project/users   → insert a document into my_project.users
+PUT    /api/v1/route/my_project/users   → update document(s) in my_project.users
+DELETE /api/v1/route/my_project/users   → delete document(s) from my_project.users
 ```
 
 ---
@@ -232,6 +236,158 @@ curl -X POST https://your-domain.com/api/v1/route/my_project/users \
 | Status | Description |
 |---|---|
 | `201` | Document inserted. Returns the `project` label. |
+| `401` | Missing `x-njord-token` header. |
+| `403` | Invalid token, or token does not match the project in the URL. |
+| `500` | Internal server error. |
+
+---
+
+### PUT /api/v1/route/\[...project\]
+
+Updates one or more documents in the collection addressed by the URL path. Supports both MongoDB operator-style updates (`$set`, `$inc`, `$push`, etc.) and full document replacement — detected automatically from the update payload.
+
+**URL structure**
+
+Same as GET — see above.
+
+**Required header**
+
+| Header | Description |
+|---|---|
+| `x-njord-token` | Your 64-character project token. |
+
+**Request body**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `filter` | object | ✓ | MongoDB filter to select the document(s) to update. |
+| `update` | object | ✓ | The update to apply. If any top-level key starts with `$`, treated as an operator update. Otherwise treated as a full replacement — `token` is stripped before saving. |
+| `options.upsert` | boolean | | If `true`, inserts a new document when no match is found. Defaults to `false`. |
+| `options.multi` | boolean | | If `true`, updates all matching documents (`updateMany`). Defaults to `false`. |
+
+**Example — operator update**
+
+```bash
+curl -X PUT https://your-domain.com/api/v1/route/my_project/users \
+  -H "Content-Type: application/json" \
+  -H "x-njord-token: 3f1d2e9a4b...64chars" \
+  -d '{
+    "filter": { "name": "Alice" },
+    "update": { "$set": { "role": "superadmin" } },
+    "options": { "upsert": false, "multi": false }
+  }'
+```
+
+**Example — full replacement**
+
+```bash
+curl -X PUT https://your-domain.com/api/v1/route/my_project/users \
+  -H "Content-Type: application/json" \
+  -H "x-njord-token: 3f1d2e9a4b...64chars" \
+  -d '{
+    "filter": { "name": "Alice" },
+    "update": { "name": "Alice", "role": "superadmin", "verified": true }
+  }'
+```
+
+**200 — Success**
+
+```json
+{
+  "status": "success",
+  "message": "Document(s) updated successfully.",
+  "project": "my_project/users",
+  "matchedCount": 1,
+  "modifiedCount": 1,
+  "upsertedId": null
+}
+```
+
+**Responses**
+
+| Status | Description |
+|---|---|
+| `200` | Returns `matchedCount`, `modifiedCount`, and `upsertedId`. |
+| `400` | Missing `filter` or `update` field in request body. |
+| `401` | Missing `x-njord-token` header. |
+| `403` | Invalid token, or token does not match the project in the URL. |
+| `500` | Internal server error. |
+
+---
+
+### DELETE /api/v1/route/\[...project\]
+
+Deletes one or more documents from the collection addressed by the URL path.
+
+> **Warning:** Deletions are permanent and cannot be undone. Use `options.multi: true` with care — it will remove every document that matches the filter. An empty filter (`{}`) is explicitly rejected to prevent accidental collection wipes.
+
+**URL structure**
+
+Same as GET — see above.
+
+**Required header**
+
+| Header | Description |
+|---|---|
+| `x-njord-token` | Your 64-character project token. |
+
+**Request body**
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `filter` | object | ✓ | MongoDB filter to select the document(s) to delete. Must be non-empty — passing `{}` returns a `400` error. |
+| `options.multi` | boolean | | If `true`, deletes all matching documents (`deleteMany`). Defaults to `false`. |
+
+**Example — delete one**
+
+```bash
+curl -X DELETE https://your-domain.com/api/v1/route/my_project/users \
+  -H "Content-Type: application/json" \
+  -H "x-njord-token: 3f1d2e9a4b...64chars" \
+  -d '{
+    "filter": { "name": "Alice" },
+    "options": { "multi": false }
+  }'
+```
+
+**Example — delete many**
+
+```bash
+curl -X DELETE https://your-domain.com/api/v1/route/my_project/users \
+  -H "Content-Type: application/json" \
+  -H "x-njord-token: 3f1d2e9a4b...64chars" \
+  -d '{
+    "filter": { "role": "guest" },
+    "options": { "multi": true }
+  }'
+```
+
+**200 — Success**
+
+```json
+{
+  "status": "success",
+  "message": "1 document(s) deleted successfully.",
+  "project": "my_project/users",
+  "deletedCount": 1
+}
+```
+
+**400 — Empty filter**
+
+```json
+{
+  "status": "error",
+  "message": "Empty filter is not allowed. Use \"purge: true\" in options to delete all documents."
+}
+```
+
+**Responses**
+
+| Status | Description |
+|---|---|
+| `200` | Returns `deletedCount`. |
+| `400` | Missing or empty `filter`. |
 | `401` | Missing `x-njord-token` header. |
 | `403` | Invalid token, or token does not match the project in the URL. |
 | `500` | Internal server error. |
