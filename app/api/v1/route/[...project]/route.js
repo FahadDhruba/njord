@@ -142,3 +142,80 @@ export async function POST(request, { params }) {
         );
     }
 }
+
+
+export async function PUT(request, { params }) {
+    try {
+        const { project } = await params;
+        const body = await request.json();
+        const client = await clientPromise;
+        const db = client.db('njordMain');
+
+        const accessToken = extractAccessToken(request);
+        const accessCheck = await assertSeasonAccess(db, accessToken);
+        if (!accessCheck.ok) {
+            return accessCheck.response;
+        }
+
+        if (accessCheck.season.projectName !== project[0].toLowerCase()) {
+            return NextResponse.json(
+                {
+                    status: 'error',
+                    message: 'Access token does not match the project.',
+                },
+                { status: 403 }
+            );
+        }
+
+        const { filter, update, options = {} } = body;
+
+        if (!filter || !update) {
+            return NextResponse.json(
+                {
+                    status: 'error',
+                    message: 'Request body must include "filter" and "update".',
+                },
+                { status: 400 }
+            );
+        }
+
+        // Detect operator-style update ({ $set: ... }) vs plain replacement
+        const isOperatorUpdate = Object.keys(update).some((k) => k.startsWith('$'));
+        const safeUpdate = isOperatorUpdate
+            ? update
+            : (({ token, ...rest }) => rest)(update); // strip token from replacements
+
+        const DynaCollection = db.collection(project.join('.').toLowerCase());
+
+        const { upsert = false, multi = false } = options;
+
+        let result;
+        if (multi) {
+            result = await DynaCollection.updateMany(filter, safeUpdate, { upsert });
+        } else {
+            result = await DynaCollection.updateOne(filter, safeUpdate, { upsert });
+        }
+
+        return NextResponse.json(
+            {
+                status: 'success',
+                message: 'Document(s) updated successfully.',
+                project: project.join('/').toLowerCase(),
+                matchedCount: result.matchedCount,
+                modifiedCount: result.modifiedCount,
+                upsertedId: result.upsertedId ?? null,
+            },
+            { status: 200 }
+        );
+    } catch (error) {
+        console.error('Error while updating Document:', error);
+        return NextResponse.json(
+            {
+                status: 'error',
+                message: 'Internal Error',
+                error: error.message,
+            },
+            { status: 500 }
+        );
+    }
+}
