@@ -14,6 +14,7 @@ const Badge = ({ children, color = 'slate' }) => {
         amber: 'bg-amber-50 text-amber-700',
         red: 'bg-red-50 text-red-600',
         blue: 'bg-blue-50 text-blue-700',
+        violet: 'bg-violet-50 text-violet-700',
     };
     return (
         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${colors[color]}`}>
@@ -23,7 +24,7 @@ const Badge = ({ children, color = 'slate' }) => {
 };
 
 const MethodBadge = ({ method }) => {
-    const map = { GET: 'emerald', POST: 'blue', PUT: 'amber', DELETE: 'red' };
+    const map = { GET: 'emerald', POST: 'blue', PUT: 'amber', DELETE: 'red', PATCH: 'violet' };
     return <Badge color={map[method] || 'slate'}>{method}</Badge>;
 };
 
@@ -110,6 +111,8 @@ function Section({ label, children }) {
     );
 }
 
+// ── Snippet strings ────────────────────────────────────────────────────────────
+
 const startCurl = `curl -X POST https://njordv1.vercel.app/api/v1/start \\
   -H "Content-Type: application/json" \\
   -d '{
@@ -155,10 +158,66 @@ const routePostSuccess = `{
   "project": "my_project/users"
 }`;
 
+const routePutCurlOperator = `curl -X PUT https://njordv1.vercel.app/api/v1/route/my_project/users \\
+  -H "Content-Type: application/json" \\
+  -H "x-njord-token: 3f1d2e9a...64chars" \\
+  -d '{
+    "filter": { "name": "Alice" },
+    "update": { "$set": { "role": "superadmin" } },
+    "options": { "upsert": false, "multi": false }
+  }'`;
+
+const routePutCurlReplace = `curl -X PUT https://njordv1.vercel.app/api/v1/route/my_project/users \\
+  -H "Content-Type: application/json" \\
+  -H "x-njord-token: 3f1d2e9a...64chars" \\
+  -d '{
+    "filter": { "name": "Alice" },
+    "update": { "name": "Alice", "role": "superadmin", "verified": true }
+  }'`;
+
+const routePutSuccess = `{
+  "status": "success",
+  "message": "Document(s) updated successfully.",
+  "project": "my_project/users",
+  "matchedCount": 1,
+  "modifiedCount": 1,
+  "upsertedId": null
+}`;
+
+const routeDeleteCurl = `curl -X DELETE https://njordv1.vercel.app/api/v1/route/my_project/users \\
+  -H "Content-Type: application/json" \\
+  -H "x-njord-token: 3f1d2e9a...64chars" \\
+  -d '{
+    "filter": { "name": "Alice" },
+    "options": { "multi": false }
+  }'`;
+
+const routeDeleteCurlMulti = `curl -X DELETE https://njordv1.vercel.app/api/v1/route/my_project/users \\
+  -H "Content-Type: application/json" \\
+  -H "x-njord-token: 3f1d2e9a...64chars" \\
+  -d '{
+    "filter": { "role": "guest" },
+    "options": { "multi": true }
+  }'`;
+
+const routeDeleteSuccess = `{
+  "status": "success",
+  "message": "1 document(s) deleted successfully.",
+  "project": "my_project/users",
+  "deletedCount": 1
+}`;
+
+const routeDeleteError400 = `{
+  "status": "error",
+  "message": "Empty filter is not allowed. Use \\"purge: true\\" in options to delete all documents."
+}`;
+
 const authError = `{
   "status": "error",
   "message": "Missing access token. Send x-njord-token."
 }`;
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function NjordDocsPage() {
     return (
@@ -355,6 +414,147 @@ export default function NjordDocsPage() {
 
                         <Section label="401/403 response">
                             <CodePanel code={authError} />
+                        </Section>
+                    </EndpointCard>
+
+                    {/* PUT /route/[...project] */}
+                    <EndpointCard
+                        method="PUT"
+                        path="/api/v1/route/[project]/[...sub]"
+                        title="Update a document"
+                        description="Updates one or more documents in the collection addressed by the URL path. Supports both MongoDB operator-style updates ($set, $inc, $push, etc.) and full document replacement — detected automatically from the update payload."
+                    >
+                        <Section label="URL structure">
+                            <div className="bg-white border border-slate-200 rounded-xl px-5 divide-y divide-slate-100">
+                                <ParamRow name="project" type="path segment" required>
+                                    Must match the <code className="font-mono text-xs">projectName</code> your token was issued for.
+                                </ParamRow>
+                                <ParamRow name="...sub" type="path segments">
+                                    Optional sub-collection path. Same dot-notation mapping as GET.
+                                </ParamRow>
+                            </div>
+                        </Section>
+
+                        <Section label="Required header">
+                            <div className="bg-white border border-slate-200 rounded-xl px-5">
+                                <ParamRow name="x-njord-token" type="string" required>
+                                    Your 64-character project token.
+                                </ParamRow>
+                            </div>
+                        </Section>
+
+                        <Section label="Request body">
+                            <div className="bg-white border border-slate-200 rounded-xl px-5 divide-y divide-slate-100">
+                                <ParamRow name="filter" type="object" required>
+                                    MongoDB filter to select the document(s) to update. Passed directly to the driver.
+                                </ParamRow>
+                                <ParamRow name="update" type="object" required>
+                                    The update to apply. If any top-level key starts with <code className="font-mono text-xs">$</code>, it is
+                                    treated as an operator update (<code className="font-mono text-xs">$set</code>, <code className="font-mono text-xs">$inc</code>, <code className="font-mono text-xs">$push</code>, etc.).
+                                    Otherwise it is treated as a full replacement — the <code className="font-mono text-xs">token</code> field is stripped before saving.
+                                </ParamRow>
+                                <ParamRow name="options.upsert" type="boolean">
+                                    If <code className="font-mono text-xs">true</code>, inserts a new document when no match is found. Defaults to <code className="font-mono text-xs">false</code>.
+                                </ParamRow>
+                                <ParamRow name="options.multi" type="boolean">
+                                    If <code className="font-mono text-xs">true</code>, updates all matching documents via <code className="font-mono text-xs">updateMany</code>. Defaults to <code className="font-mono text-xs">false</code> (single document).
+                                </ParamRow>
+                            </div>
+                        </Section>
+
+                        <Section label="Example — operator update ($set)">
+                            <CodePanel code={routePutCurlOperator} />
+                        </Section>
+
+                        <Section label="Example — full replacement">
+                            <CodePanel code={routePutCurlReplace} />
+                        </Section>
+
+                        <Section label="Responses">
+                            <div className="bg-white border border-slate-200 rounded-xl px-5">
+                                <ResponseRow code="200" color="text-emerald-600" label="Returns matchedCount, modifiedCount, and upsertedId." />
+                                <ResponseRow code="400" color="text-amber-600" label="Missing filter or update field in request body." />
+                                <ResponseRow code="401" color="text-amber-600" label="Missing x-njord-token header." />
+                                <ResponseRow code="403" color="text-red-500" label="Invalid token, or token does not match this project." />
+                                <ResponseRow code="500" color="text-red-500" label="Internal server error." />
+                            </div>
+                        </Section>
+
+                        <Section label="200 response">
+                            <CodePanel code={routePutSuccess} />
+                        </Section>
+                    </EndpointCard>
+
+                    {/* DELETE /route/[...project] */}
+                    <EndpointCard
+                        method="DELETE"
+                        path="/api/v1/route/[project]/[...sub]"
+                        title="Delete a document"
+                        description="Deletes one or more documents from the collection addressed by the URL path. An empty filter is explicitly blocked to prevent accidental collection wipes."
+                    >
+                        <Section label="URL structure">
+                            <div className="bg-white border border-slate-200 rounded-xl px-5 divide-y divide-slate-100">
+                                <ParamRow name="project" type="path segment" required>
+                                    Must match the <code className="font-mono text-xs">projectName</code> your token was issued for.
+                                </ParamRow>
+                                <ParamRow name="...sub" type="path segments">
+                                    Optional sub-collection path. Same dot-notation mapping as GET.
+                                </ParamRow>
+                            </div>
+                        </Section>
+
+                        <Section label="Required header">
+                            <div className="bg-white border border-slate-200 rounded-xl px-5">
+                                <ParamRow name="x-njord-token" type="string" required>
+                                    Your 64-character project token.
+                                </ParamRow>
+                            </div>
+                        </Section>
+
+                        <Section label="Request body">
+                            <div className="bg-white border border-slate-200 rounded-xl px-5 divide-y divide-slate-100">
+                                <ParamRow name="filter" type="object" required>
+                                    MongoDB filter to select the document(s) to delete. Must be a non-empty object —
+                                    passing <code className="font-mono text-xs">{'{}'}</code> returns a 400 error.
+                                </ParamRow>
+                                <ParamRow name="options.multi" type="boolean">
+                                    If <code className="font-mono text-xs">true</code>, deletes all matching documents via <code className="font-mono text-xs">deleteMany</code>.
+                                    Defaults to <code className="font-mono text-xs">false</code> (single document).
+                                </ParamRow>
+                            </div>
+                        </Section>
+
+                        <div className="bg-red-50 border border-red-100 rounded-xl px-5 py-4 flex gap-3">
+                            <span className="text-red-400 mt-0.5">⚠</span>
+                            <p className="text-sm text-red-800">
+                                Deletions are permanent and cannot be undone. Use <code className="font-mono text-xs">options.multi: true</code> with care — it will remove every document that matches the filter.
+                            </p>
+                        </div>
+
+                        <Section label="Example — delete one">
+                            <CodePanel code={routeDeleteCurl} />
+                        </Section>
+
+                        <Section label="Example — delete many">
+                            <CodePanel code={routeDeleteCurlMulti} />
+                        </Section>
+
+                        <Section label="Responses">
+                            <div className="bg-white border border-slate-200 rounded-xl px-5">
+                                <ResponseRow code="200" color="text-emerald-600" label="Returns deletedCount." />
+                                <ResponseRow code="400" color="text-amber-600" label="Missing or empty filter." />
+                                <ResponseRow code="401" color="text-amber-600" label="Missing x-njord-token header." />
+                                <ResponseRow code="403" color="text-red-500" label="Invalid token, or token does not match this project." />
+                                <ResponseRow code="500" color="text-red-500" label="Internal server error." />
+                            </div>
+                        </Section>
+
+                        <Section label="200 response">
+                            <CodePanel code={routeDeleteSuccess} />
+                        </Section>
+
+                        <Section label="400 response — empty filter">
+                            <CodePanel code={routeDeleteError400} />
                         </Section>
                     </EndpointCard>
                 </section>
