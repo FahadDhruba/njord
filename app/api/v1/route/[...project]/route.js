@@ -219,3 +219,81 @@ export async function PUT(request, { params }) {
         );
     }
 }
+
+
+export async function DELETE(request, { params }) {
+    try {
+        const { project } = await params;
+        const body = await request.json();
+        const client = await clientPromise;
+        const db = client.db('njordMain');
+
+        const accessToken = extractAccessToken(request);
+        const accessCheck = await assertSeasonAccess(db, accessToken);
+        if (!accessCheck.ok) {
+            return accessCheck.response;
+        }
+
+        if (accessCheck.season.projectName !== project[0].toLowerCase()) {
+            return NextResponse.json(
+                {
+                    status: 'error',
+                    message: 'Access token does not match the project.',
+                },
+                { status: 403 }
+            );
+        }
+
+        const { filter, options = {} } = body;
+
+        if (!filter) {
+            return NextResponse.json(
+                {
+                    status: 'error',
+                    message: 'Request body must include "filter".',
+                },
+                { status: 400 }
+            );
+        }
+
+        if (Object.keys(filter).length === 0) {
+            return NextResponse.json(
+                {
+                    status: 'error',
+                    message: 'Empty filter is not allowed. Use "purge: true" in options to delete all documents.',
+                },
+                { status: 400 }
+            );
+        }
+
+        const DynaCollection = db.collection(project.join('.').toLowerCase());
+        const { multi = false } = options;
+
+        let result;
+        if (multi) {
+            result = await DynaCollection.deleteMany(filter);
+        } else {
+            result = await DynaCollection.deleteOne(filter);
+        }
+
+        return NextResponse.json(
+            {
+                status: 'success',
+                message: `${result.deletedCount} document(s) deleted successfully.`,
+                project: project.join('/').toLowerCase(),
+                deletedCount: result.deletedCount,
+            },
+            { status: 200 }
+        );
+    } catch (error) {
+        console.error('Error while deleting Document:', error);
+        return NextResponse.json(
+            {
+                status: 'error',
+                message: 'Internal Error',
+                error: error.message,
+            },
+            { status: 500 }
+        );
+    }
+}
